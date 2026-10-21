@@ -39,7 +39,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            eratolabcool/qwen-image-turbo:v1
+            eratolabcool/qwen-image-turbo:v2
             eratolabcool/qwen-image-turbo:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
