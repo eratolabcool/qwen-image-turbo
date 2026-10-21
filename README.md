@@ -4,22 +4,31 @@ Serverless GPU endpoint for **Qwen/Qwen-Image-2.1-Turbo** (8-step turbo
 checkpoint, 7B architecture). Text-to-image + image editing via the native
 Diffusers `QwenImage21Pipeline`.
 
-## Live endpoint
+## Live endpoints
 
-| | |
-|---|---|
-| Endpoint ID | `1xhr888nye1wtz` |
-| Name | `qwen-image-21-turbo` |
-| Model | `Qwen/Qwen-Image-2.1-Turbo` |
-| GPU pool | ADA_48_PRO (L40S / RTX 6000 Ada / L40, 48GB) |
-| Image | `eratolabcool/qwen-image-turbo:v2` (Docker Hub, public) |
-| Runsync | `https://api.runpod.ai/v2/1xhr888nye1wtz/runsync` |
+Two RunPod accounts run the same worker from the same public image.
+
+| Account | Endpoint ID | Runsync |
+|---|---|---|
+| eratolabcool@gmail.com | `1xhr888nye1wtz` | `https://api.runpod.ai/v2/1xhr888nye1wtz/runsync` |
+| shjack803@gmail.com | `jg9y65c0o6ao94` | `https://api.runpod.ai/v2/jg9y65c0o6ao94/runsync` |
+
+Common config: model `Qwen/Qwen-Image-2.1-Turbo`, GPU pool ADA_48_PRO
+(L40S / RTX 6000 Ada / L40, 48GB), image `eratolabcool/qwen-image-turbo:v2`
+(Docker Hub, public), idle-timeout 300s, execution-timeout 900s.
 
 ## Call it
 
 ```bash
+# account 1 (eratolabcool@gmail.com)
 curl -X POST "https://api.runpod.ai/v2/1xhr888nye1wtz/runsync" \
   -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"prompt":"A cute corgi puppy in a field of wildflowers, golden hour, photorealistic","width":1024,"height":1024,"format":"jpeg"}}'
+
+# account 2 (shjack803@gmail.com) — use $RUNPOD_API_KEY_2
+curl -X POST "https://api.runpod.ai/v2/jg9y65c0o6ao94/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY_2" \
   -H "Content-Type: application/json" \
   -d '{"input":{"prompt":"A cute corgi puppy in a field of wildflowers, golden hour, photorealistic","width":1024,"height":1024,"format":"jpeg"}}'
 ```
