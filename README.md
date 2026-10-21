@@ -1,35 +1,45 @@
 # Qwen Image 2.1 Turbo — RunPod Serverless worker
 
 Serverless GPU endpoint for **Qwen/Qwen-Image-2.1-Turbo** (8-step turbo
-checkpoint of Qwen-Image-2.1, 7B visual generation architecture). Text-to-image
-and image editing via the native Diffusers `QwenImage21Pipeline`.
+checkpoint, 7B architecture). Text-to-image + image editing via the native
+Diffusers `QwenImage21Pipeline`.
 
-## Request contract
+## Live endpoint
+
+| | |
+|---|---|
+| Endpoint ID | `1xhr888nye1wtz` |
+| Name | `qwen-image-21-turbo` |
+| Model | `Qwen/Qwen-Image-2.1-Turbo` |
+| GPU pool | ADA_48_PRO (L40S / RTX 6000 Ada / L40, 48GB) |
+| Image | `eratolabcool/qwen-image-turbo:v2` (Docker Hub, public) |
+| Runsync | `https://api.runpod.ai/v2/1xhr888nye1wtz/runsync` |
+
+## Call it
 
 ```bash
-curl -X POST "https://api.runpod.ai/v2/{ENDPOINT_ID}/runsync" \
-  -H "Authorization: Bearer {RUNPOD_API_KEY}" \
+curl -X POST "https://api.runpod.ai/v2/1xhr888nye1wtz/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"input":{"prompt":"A cute corgi puppy in a field of wildflowers, golden hour","width":1024,"height":1024}}'
+  -d '{"input":{"prompt":"A cute corgi puppy in a field of wildflowers, golden hour, photorealistic","width":1024,"height":1024,"format":"jpeg"}}'
 ```
 
-Async variant: `POST /run` → poll `GET /status/{id}`.
+Or async: `POST /run` → poll `GET /status/{id}`.
 
-### Input fields
+### Input fields (this worker's contract)
 
-| field            | type    | default | notes                                        |
-| ---------------- | ------- | ------- | -------------------------------------------- |
-| `prompt`         | str     | —       | required                                     |
-| `negative_prompt`| str     | —       | only used when `true_cfg_scale` > 1          |
-| `true_cfg_scale` | float   | 1.0     | CFG=1 is the model default                   |
-| `image`          | str     | —       | editing: URL or base64 (data-URI ok)         |
-| `width`          | int     | 1024    |                                             |
-| `height`         | int     | 1024    |                                             |
-| `num_images`     | int     | 1       | 1–4                                          |
-| `seed`           | int     | —       | deterministic when set                       |
-| `use_kv_cache`   | bool    | true    | prefix KV cache (recommended, faster)        |
-| `format`         | str     | png     | `png` \| `jpeg` \| `webp`                    |
-| `quality`        | int     | 90      | jpeg/webp quality                            |
+| field | default | notes |
+|---|---|---|
+| `prompt` | — | required |
+| `negative_prompt` | — | only used when `true_cfg_scale` > 1 |
+| `true_cfg_scale` | 1.0 | CFG=1 is the model default |
+| `image` | — | editing: URL or base64 (data-URI ok) |
+| `width` / `height` | 1024 | 8-step schedule ignores `num_inference_steps` |
+| `num_images` | 1 | 1–4 |
+| `seed` | random | deterministic when set |
+| `use_kv_cache` | true | prefix KV cache (recommended) |
+| `format` | png | `png` \| `jpeg` \| `webp` |
+| `quality` | 90 | jpeg/webp only |
 
 ### Output
 
@@ -37,51 +47,42 @@ Async variant: `POST /run` → poll `GET /status/{id}`.
 {
   "status": "success",
   "model": "Qwen/Qwen-Image-2.1-Turbo",
-  "images": [{"mime": "image/png", "base64": "..."}],
-  "width": 1024,
-  "height": 1024,
-  "elapsed_sec": 12.3
+  "images": [{"mime": "image/jpeg", "base64": "..."}],
+  "width": 1024, "height": 1024,
+  "elapsed_sec": 1.44
 }
 ```
 
-Images are returned as base64 (self-contained; decode client-side or use a data
-URI directly).
+512×512 measured at **~1.4s** warm. Images are base64 (decode client-side).
 
-## Transparent images (RGBA)
+## How it was built / deployed
 
-The model generates native transparency when prompted:
+1. `requirements.txt` + `Dockerfile` (python:3.11-slim, torch 2.10.0 CUDA-bundled).
+2. GitHub Actions (`.github/workflows/build.yml`) builds `linux/amd64` and pushes
+   to Docker Hub `eratolabcool/qwen-image-turbo:{v2,latest}` — avoids the
+   Apple-Silicon/arm64 problem.
+3. RunPod template `zwxwxlxozu` + endpoint created with `runpodctl`.
 
-```
-This is an RGBA image with transparency. A cute cartoon dragon sticker. The image has alpha channel and the background is transparent.
-```
-
-## Deploy
+Rebuild after code changes:
 
 ```bash
-cp .env.example .env   # fill in RUNPOD_API_KEY
-./deploy.sh
+# bump tag in .github/workflows/build.yml, then
+git push origin main   # triggers build; or:
+gh workflow run "Build RunPod Image"
 ```
 
-The script builds the image, pushes it, creates a serverless template, then
-creates the endpoint.
+## Cold start & model cache
 
-### GPU / memory
+The ~32 GB checkpoint is downloaded from Hugging Face at cold start
+(`hf_transfer` enabled, a few minutes on RunPod's network). `idle-timeout` is
+300s, so the worker stays warm for 5 min after the last request. **Optimization
+(not yet done):** attach a RunPod Network Volume and set `HF_HOME` to its mount
+path so the weights survive scale-to-zero instead of re-downloading.
 
-The full checkpoint is ~32 GB in bf16 (text encoder 17.5 GB + transformer
-14.2 GB + VAE 0.7 GB), so a **48 GB+ GPU is required**. Default `NVIDIA L40S`
-(fast); `NVIDIA A40` is the cheaper 48 GB option. 24 GB cards OOM without CPU
-offload.
-
-### Cold start
-
-Weights are downloaded from Hugging Face at cold start (`hf_transfer` enabled,
-~32 GB → a few minutes on RunPod's network). The endpoint keeps workers warm for
-`idle-timeout` (300 s) to avoid re-downloading between bursts. To eliminate the
-download entirely, attach a RunPod **Network Volume** pre-populated with the
-weights and set `HF_HOME` to its mount path.
+`flash-boot` is currently OFF (a stale flashboot snapshot served an old image
+during testing). Re-enable once the image is stable.
 
 ## Troubleshooting
 
-- **Worker logs**: `runpodctl serverless logs --id {ENDPOINT_ID}`
-- **Model mount/status**: `runpodctl serverless model-status {ENDPOINT_ID}`
-- **Check endpoint health**: `runpodctl serverless health {ENDPOINT_ID}`
+- `runpodctl serverless logs 1xhr888nye1wtz`
+- `runpodctl serverless health 1xhr888nye1wtz`
